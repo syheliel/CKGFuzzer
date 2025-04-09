@@ -2,21 +2,24 @@ import os
 import shutil
 import subprocess
 import re
+from  pathlib import Path
 from html import unescape
-
+from loguru import logger
 # Function to clean HTML from labels
 def clean_label(html_label):
     # Removing HTML tags and converting HTML entities
     clean_text = re.sub(r'<[^>]+>', '', html_label)
     return unescape(clean_text)
     
-def change_folder_owner(chscript, folder_path, new_owner):
-    #try:
+def change_folder_owner(chscript:str, folder_path:str, new_owner:str):
+    folder_path_p = Path(folder_path)
+    folder_path_p.mkdir(parents=True, exist_ok=True)
+    # try:
         # Construct the command to change ownership
-        command = [chscript, folder_path]
-        # Execute the command
-        subprocess.run(command, check=True)
-        print(f"Changed ownership of {folder_path} to {new_owner}.")
+    command = [chscript, folder_path]
+    # Execute the command
+    subprocess.run(command, check=True)
+    logger.info(f"Changed ownership of {folder_path} to {new_owner}.")
         
 def get_all_files(directory, extensions):
     files = []

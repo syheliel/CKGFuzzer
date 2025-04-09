@@ -2,6 +2,13 @@
 import sys
 import os
 from pathlib import Path
+from loguru import logger
+logger.remove()  # Remove default handler
+logger.add(
+    sys.stderr,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{function}</cyan> | <cyan>{file.path}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    level="INFO",
+)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 # 获取父目录
 parent_dir = os.path.dirname(current_dir)
@@ -45,7 +52,7 @@ import chardet
 
             
 class RepositoryAgent:
-    def __init__(self, args: Dict = None):
+    def __init__(self, args: Dict):
         """
         Initializes the PlanningAgent with the extracted API information.
 
@@ -54,43 +61,48 @@ class RepositoryAgent:
         """
         super().__init__()
         self.args = args
-        self.shared_llm_dir = args.shared_llm_dir
-        self.src_folder = f'{args.shared_llm_dir}/source_code/{args.project_name}'
-        self.queryes_folder = f'{args.shared_llm_dir}/qlpacks/cpp_queries/'
-        self.database_db = f'{args.shared_llm_dir}/codeqldb/{args.project_name}'
-        self.output_results_folder = f'{args.saved_dir}'
+        self.shared_llm_dir = args.shared_llm_dir # type: ignore
+        self.src_folder = f'{args.shared_llm_dir}/source_code/{args.project_name}' # type: ignore
+        self.queryes_folder = f'{args.shared_llm_dir}/qlpacks/cpp_queries/' # type: ignore
+        self.database_db = f'{args.shared_llm_dir}/codeqldb/{args.project_name}' # type: ignore
+        self.output_results_folder = f'{args.saved_dir}' # type: ignore
+        self.project_name = args.project_name # type: ignore
         check_create_folder(self.output_results_folder)
 
         
         self.init_repo()
         
 
-    def init_repo(self) -> List[str]:
+    def init_repo(self) -> None:
         """
         Initializes the repository with the provided arguments.
             1. Add the repo to the database codeql.
             2. Extract API Info.
         """
-        if os.path.isfile(f'{args.shared_llm_dir}/codeqldb/{args.project_name}/.successfully_created'):
-            logger.info(f"Database for {args.project_name} already exists.")
+        if os.path.isfile(f'{self.shared_llm_dir}/codeqldb/{self.project_name}/.successfully_created'):
+            logger.info(f"Database for {self.project_name} already exists.")
             # print(f"Database for {args.project_name} already exists.")
         else:
             self._add_local_repo_to_database(self.args)
         
         if not os.path.isdir(f'{self.src_folder}'):
-            logger.info(f"{args.project_name} does not exist.")
+            logger.info(f"{self.project_name} does not exist.")
             self.copy_source_code_fromDocker()
 
 
     def _add_local_repo_to_database(self, args: Dict) -> None:
+        project_name:str = args.project_name # type: ignore
+        language:str = args.language # type: ignore
         USER_NAME = getpass.getuser()
-        project_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'projects', args.project_name)
-        dockerfile_path = os.path.join(project_dir, 'Dockerfile')
+        project_dir = Path(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) / 'projects' / project_name
+        project_dir = project_dir.resolve()
+        shared_llm_dir:Path = Path(args.shared_llm_dir).resolve() # type: ignore
+        dockerfile_path = project_dir / 'Dockerfile'
 
         if not os.path.exists(dockerfile_path):
             raise FileNotFoundError(f"Dockerfile not found at {dockerfile_path}")
 
-        image_name = f'{args.project_name}_base_image'
+        image_name = f'{project_name}_base_image'
         build_command = f'docker build -t {image_name} -f {dockerfile_path} {project_dir}'
         
         try:
@@ -100,59 +112,71 @@ class RepositoryAgent:
             return
 
         # Prepare the CodeQL command
-        codeql_command = f'/src/fuzzing_os/codeql/codeql database create /src/fuzzing_os/codeqldb/{args.project_name} --language={args.language}'
+        codeql_command = f'/src/fuzzing_os/codeql/codeql database create /src/fuzzing_os/codeqldb/{project_name} --language={language}'
         
-        if args.language in ['c', 'cpp', 'c++', 'java', 'csharp', 'go', 'java-kotlin']:
-            codeql_command += f' --command="/src/fuzzing_os/wrapper.sh {args.project_name}"'
+        if language in ['c', 'cpp', 'c++', 'java', 'csharp', 'go', 'java-kotlin']:
+            codeql_command += f' --command="/src/fuzzing_os/wrapper.sh {project_name}"'
 
         # Run the Docker container with the CodeQL command
         command = [
             'docker', 'run', '--rm',
-            '-v', f'{args.shared_llm_dir}:/src/fuzzing_os',
+            '-v', f'{shared_llm_dir}:/src/fuzzing_os',
             '-t', image_name,
             '/bin/bash', '-c', codeql_command
         ]
-
+        logger.info(f"Running command: {' '.join(command)}")
         result = subprocess.run(command, capture_output=True, text=True)
 
-        change_folder_owner(f"{args.shared_llm_dir}/change_owner.sh", f'{args.shared_llm_dir}/codeqldb/{args.project_name}', USER_NAME)
+        change_owner_script = shared_llm_dir / 'change_owner.sh'
+        change_owner_script = change_owner_script.resolve()
+        
+        codeql_db_dir = shared_llm_dir / 'codeqldb' / project_name
+        codeql_db_dir = codeql_db_dir.resolve()
+        
+        change_folder_owner(str(change_owner_script), str(codeql_db_dir), USER_NAME)
 
-        if f"Successfully created database at /src/fuzzing_os/codeqldb/{args.project_name}" in result.stdout:
-            with open(f'{args.shared_llm_dir}/codeqldb/{args.project_name}/.successfully_created', 'w') as f:
+        if f"Successfully created database at /src/fuzzing_os/codeqldb/{project_name}" in result.stdout:
+            success_file = codeql_db_dir / '.successfully_created'
+            with open(success_file, 'w') as f:
                 f.write('')
             logger.info(result.stdout)
-            logger.info(f"Confirmed Successfully created database at /src/fuzzing_os/codeqldb/{args.project_name}")
+            logger.info(f"Confirmed Successfully created database at /src/fuzzing_os/codeqldb/{project_name}")
         else:
             print(result.stdout)
             print(result.stderr)
-            assert False, f"Failed to create database at /src/fuzzing_os/codeqldb/{args.project_name}"
+            assert False, f"Failed to create database at /src/fuzzing_os/codeqldb/{project_name}"
 
     def _add_repo_to_database(self, args: Dict) -> None:
-        image_name = f'gcr.io/oss-fuzz/{args.project_name}'
+        project_name:str = args.project_name # type: ignore
+        language:str = args.language # type: ignore
+        shared_llm_dir:Path = Path(args.shared_llm_dir).resolve() # type: ignore
+        image_name = f'gcr.io/oss-fuzz/{project_name}'
         if not check_image_exists(image_name):
-            create_image(args.project_name)
+            create_image(project_name)
             
         # USER_NAME = getpass.getuser()
-        if args.language in ['c','cpp', 'java', 'csharp','go', 'java-kotlin']:
-            logger.info(f"args.shared_llm_dir {args.shared_llm_dir}")
-            command = ['-v', f'{os.path.abspath(args.shared_llm_dir)}:/src/fuzzing_os', '-t', f'gcr.io/oss-fuzz/{args.project_name}', '/bin/bash', '-c', f'/src/fuzzing_os/codeql/codeql database create /src/fuzzing_os/codeqldb/{args.project_name} --language={args.language}  --command="/src/fuzzing_os/wrapper.sh {args.project_name}" && chown -R 1000:1000 /src/fuzzing_os/codeqldb/{args.project_name}' ] # --command="/src/fuzzing_os/wrapper.sh {args.project_name} --source-root={args.project_name}
+        if language in ['c','cpp', 'java', 'csharp','go', 'java-kotlin']:
+            logger.info(f"args.shared_llm_dir {shared_llm_dir}")
+            command = ['-v', f'{shared_llm_dir}:/src/fuzzing_os', '-t', f'gcr.io/oss-fuzz/{project_name}', '/bin/bash', '-c', f'/src/fuzzing_os/codeql/codeql database create /src/fuzzing_os/codeqldb/{project_name} --language={language}  --command="/src/fuzzing_os/wrapper.sh {project_name}" && chown -R 1000:1000 /src/fuzzing_os/codeqldb/{project_name}' ] # --command="/src/fuzzing_os/wrapper.sh {args.project_name} --source-root={args.project_name}
+            logger.info(f"Running command: {' '.join(command)}")
         else:
-            command = ['-v', f'{os.path.abspath(args.shared_llm_dir)}:/src/fuzzing_os', '-t', f'gcr.io/oss-fuzz/{args.project_name}', '/bin/bash', '-c', f'/src/fuzzing_os/codeql/codeql database create /src/fuzzing_os/codeqldb/{args.project_name} --language={args.language} && chown -R 1000:1000 /src/fuzzing_os/codeqldb/{args.project_name}' ] # --source-root={args.project_name}
+            command = ['-v', f'{shared_llm_dir}:/src/fuzzing_os', '-t', f'gcr.io/oss-fuzz/{project_name}', '/bin/bash', '-c', f'/src/fuzzing_os/codeql/codeql database create /src/fuzzing_os/codeqldb/{project_name} --language={language} && chown -R 1000:1000 /src/fuzzing_os/codeqldb/{project_name}' ] # --source-root={args.project_name}
+            logger.info(f"Running command: {' '.join(command)}")
         result,_ = docker_run(command, print_output=True, architecture='x86_64')
         #change_folder_owner(f"{args.shared_llm_dir}/change_owner.sh",f'{args.shared_llm_dir}/codeqldb/{args.project_name}', USER_NAME)
-        if f"Successfully created database at /src/fuzzing_os/codeqldb/{args.project_name}" in result:
-            with open(f'{args.shared_llm_dir}/codeqldb/{args.project_name}/.successfully_created', 'w') as f:
+        if f"Successfully created database at /src/fuzzing_os/codeqldb/{project_name}" in result:
+            with open(f'{shared_llm_dir}/codeqldb/{project_name}/.successfully_created', 'w') as f:
                 f.write('')
             logger.info(result)
-            logger.info(f"Confirmed Successfully created database at /src/fuzzing_os/codeqldb/{args.project_name}")
+            logger.info(f"Confirmed Successfully created database at /src/fuzzing_os/codeqldb/{project_name}")
         else:
             logger.info(result)
-            logger.info(f"Failed to create database at /src/fuzzing_os/codeqldb/{args.project_name}" )
-            assert False, f"Failed to create database at /src/fuzzing_os/codeqldb/{args.project_name}"    
+            logger.info(f"Failed to create database at /src/fuzzing_os/codeqldb/{project_name}" )
+            assert False, f"Failed to create database at /src/fuzzing_os/codeqldb/{project_name}"    
     
 
     # read the function name and its source code name from the returned dict of extract_api_from_head
-    def extract_src_test_api_call_graph(self, data: Dict, pool_num=4) -> Dict:
+    def extract_src_test_api_call_graph(self, data: Dict, pool_num=4):
         """
         ToDO: multple thread SUPPORT, need to keep the copy database for each thread
         Extracts the source and test API information from the repository.
@@ -196,23 +220,64 @@ class RepositoryAgent:
         Extracts the call graph from the repository.
         """
         logger.info("Extracting call graph from the repository.")
-        extract_shell_script = f"{shared_llm_dir}/qlpacks/cpp_queries/extract_call_graph.sh"
+        extract_shell_script = Path(f"{shared_llm_dir}/qlpacks/cpp_queries/extract_call_graph.sh").resolve()
         pname = fn_file_name.replace('/', '_')
+        
+        # Create the call_graph directory if it doesn't exist
+        call_graph_dir = Path(f"{outputfolder}/call_graph")
+        call_graph_dir.mkdir(parents=True, exist_ok=True)
+        
         if os.path.isfile(extract_shell_script):
             if not os.path.isfile(f"{outputfolder}/call_graph/{pname}@{fn_name}_call_graph.bqrs"):
-                logger.info(f"{outputfolder}/call_graph/{pname}@{fn_name}_call_graph.bqrs")
                 # convert dbbase and outputfolder to the absolute path
                 dbbase = os.path.abspath(dbbase)
-                outputfolder = os.path.abspath(outputfolder)
-                #fn_name="ares__dns_options_free"
+                outputfolder = Path(outputfolder).resolve()
+                
+                # Check if the database exists
+                if not os.path.exists(dbbase):
+                    logger.error(f"Database path does not exist: {dbbase}")
+                    return
+                
                 logger.info(f"Extracting call graph for {fn_name} in {fn_file_name}.")
-                run_command([extract_shell_script, fn_name, fn_file_name, dbbase, outputfolder, str(pid)])
-                logger.info("Call graph is converted into the csv file.")
-                #fn_file="${fn_file//\//_}"
-            if not os.path.isfile(f"{outputfolder}/call_graph/{pname}@{fn_name}_call_graph.csv"):
-                run_converted_csv(f"{outputfolder}/call_graph/{pname}@{fn_name}_call_graph.bqrs")  
+                logger.info(f"Running command: {extract_shell_script} {fn_name} {fn_file_name} {dbbase} {outputfolder} {str(pid)}")
+                
+                try:
+                    # Run the command and capture output
+                    result = subprocess.run(
+                        [extract_shell_script.as_posix(), fn_name, fn_file_name, dbbase, outputfolder.as_posix(), str(pid)],
+                        check=False,  # Don't raise exception on non-zero exit
+                        capture_output=True,
+                        text=True
+                    )
+                    
+                    # Log the output regardless of success
+                    if result.stdout:
+                        logger.info(f"Command stdout: {result.stdout}")
+                    if result.stderr:
+                        logger.error(f"Command stderr: {result.stderr}")
+                        raise Exception(f"Command stderr: {result.stderr}")
+                    
+                    # Check if the command was successful
+                    if result.returncode != 0:
+                        logger.error(f"Command failed with exit code {result.returncode}")
+                        return
+                    
+                    logger.info("Call graph is converted into the csv file.")
+                except Exception as e:
+                    logger.error(f"Exception running extract_call_graph.sh: {str(e)}")
+                    return
+            else:
+                logger.info(f"BQRS file already exists for {fn_name} in {fn_file_name}")
+                
+            # Only try to convert to CSV if the BQRS file exists
+            bqrs_file = f"{outputfolder}/call_graph/{pname}@{fn_name}_call_graph.bqrs"
+            if os.path.isfile(bqrs_file) and not os.path.isfile(f"{outputfolder}/call_graph/{pname}@{fn_name}_call_graph.csv"):
+                try:
+                    run_converted_csv(bqrs_file)
+                except Exception as e:
+                    logger.error(f"Error converting BQRS to CSV: {str(e)}")
         else:
-            assert False, f"Extract call graph shell script {extract_shell_script} does not exist. PWD {os.getcwd()}"
+            logger.error(f"Extract call graph shell script {extract_shell_script} does not exist. PWD {os.getcwd()}")
               
     def copy_source_code_fromDocker(self):
         """
@@ -307,13 +372,13 @@ class RepositoryAgent:
                     
                    
                     try:
-                        code = raw.decode(encoding)
+                        code = raw.decode(encoding) # type: ignore
                     except:
                         logger.error(f"Failed to decode {src} with detected encoding {encoding}. Skipping this file.")
                         continue
 
                 try:
-                    fn_def_list, fn_declaraion, class_node_list, struct_node_list, include_list, global_variables, enumerate_node_list = CppParser.split_code(code, is_return_node=False)
+                    fn_def_list, fn_declaraion, class_node_list, struct_node_list, include_list, global_variables, enumerate_node_list = CppParser.split_code(code, is_return_node=False) # type: ignore
                     result[k][src] = {
                         'fn_def_list': fn_def_list,
                         'fn_declaraion': fn_declaraion,
@@ -368,7 +433,7 @@ def setup_parser() -> argparse.ArgumentParser:
 if __name__ == "__main__":
     parser = setup_parser()
     args = parser.parse_args()
-    r = RepositoryAgent(args)
+    r = RepositoryAgent(args) # type: ignore
     
     logger.info(f"The current work path is: {os.getcwd()}")
     result_src, result_test = None, None
@@ -383,7 +448,7 @@ if __name__ == "__main__":
     if args.call_graph:
         if result_src is None and result_test is None:
             result_src, result_test = r.extract_api_from_head()
-        r.extract_src_test_api_call_graph(result_src)
+        r.extract_src_test_api_call_graph(result_src) # type: ignore
         
 
  

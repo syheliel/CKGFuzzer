@@ -1,8 +1,11 @@
 import os,sys
-
-from sympy import Plane
-# from configs.log import setup_logger
 from loguru import logger
+logger.remove()  # Remove default handler
+logger.add(
+    sys.stderr,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{function}</cyan> | <cyan>{file.path}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    level="INFO",
+)
 # Get the current working directory
 current_work_dir = os.getcwd()
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../'))

@@ -10,3 +10,7 @@ docker_shared/codeql
 crash
 
 __pycache__/
+repo_log.txt
+docker_shared/source_code/
+docker_shared/codeqldb/
+docker_shared/qlpacks/

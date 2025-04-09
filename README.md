@@ -81,3 +81,6 @@ If you want to skip certain steps, use the `--skip_*` options. For example:
 python fuzzing.py --yaml /fuzzing_llm_engine/external_database/{project}/config.yaml --skip_gen_driver --skip_summary_api --skip_check_compilation --skip_gen_input
 ```
 This command skips the fuzz driver generation and proceeds with the remaining steps.
+```
+wget https://github.com/github/codeql-action/releases/download/codeql-bundle-v2.18.4/codeql-bundle-linux64.tar.gz
+```

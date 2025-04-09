@@ -3,7 +3,7 @@ import subprocess
 from . import _get_command_string
 import os
 from configs.codeql_config import CODEQL_PATH
-
+from pathlib import Path
 def add_codeql_to_path():
     codeql_path = CODEQL_PATH
     current_path = os.environ.get('PATH', '')
@@ -20,31 +20,64 @@ add_codeql_to_path()
 
 
 def run_command(command):
-    logger.info(f'Running: %s {_get_command_string(command)}' )
     try:
-        subprocess.run(command, check=True)
-        #logger.info('Running: remove duplication from the csv file.')
-        # subprocess.run(["sort", "--parallel", "5","-u", f"{output_file.replace('.bqrs', '.csv')}", "-o", f"{output_file.replace('.bqrs', '.csv')}"], shell=True, check=True)
+        logger.info(f"Running command: {' '.join(command)}")
+        result = subprocess.run(command, check=False, capture_output=True, text=True)
+        
+        # Log the output regardless of success
+        if result.stdout:
+            logger.info(f"Command stdout: {result.stdout}")
+        if result.stderr:
+            logger.error(f"Command stderr: {result.stderr}")
+        
+        # Check if the command was successful
+        if result.returncode != 0:
+            logger.error(f"Command failed with exit code {result.returncode}")
+            return ""
+            
+        return result.stdout
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to run the query: {e}")
+        if e.stderr:
+            logger.error(f"Command stderr: {e.stderr.decode() if isinstance(e.stderr, bytes) else e.stderr}")
         return ""
     except Exception as e:
         logger.error(f"An error occurred: {e}")
         return ""
     
 
-def run_converted_csv(output_file) -> str:
+def run_converted_csv(output_file:str) -> str:
     # codeql bqrs decode --format=csv ./find_api.bqrs  --output=find_api.csv
     csv_file = output_file.replace('.bqrs', '.csv')
-    command = [ "codeql", "bqrs", "decode", "--format=csv", output_file, f"--output={output_file.replace('.bqrs', '.csv')}" ]
-    logger.info(f'Running: %s {_get_command_string(command)}' )
-    try:
-        subprocess.run(command, check=True)
+    output_file_path = Path(output_file).resolve()
+    
+    # Check if the BQRS file exists
+    if not output_file_path.exists():
+        logger.error(f"BQRS file does not exist: {output_file}")
         return csv_file
-        #logger.info('Running: remove duplication from the csv file.')
-        # subprocess.run(["sort", "--parallel", "5","-u", f"{output_file.replace('.bqrs', '.csv')}", "-o", f"{output_file.replace('.bqrs', '.csv')}"], shell=True, check=True)
+        
+    output_file_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [ "codeql", "bqrs", "decode", "--format=csv", output_file, f"--output={csv_file}" ]
+    logger.info(f'Running: {_get_command_string(command)}' )
+    try:
+        result = subprocess.run(command, check=False, capture_output=True, text=True)
+        
+        # Log the output regardless of success
+        if result.stdout:
+            logger.info(f"Command stdout: {result.stdout}")
+        if result.stderr:
+            logger.error(f"Command stderr: {result.stderr}")
+        
+        # Check if the command was successful
+        if result.returncode != 0:
+            logger.error(f"Command failed with exit code {result.returncode}")
+            return csv_file
+            
+        return csv_file
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to run the query: {e}")
+        if e.stderr:
+            logger.error(f"Command stderr: {e.stderr.decode() if isinstance(e.stderr, bytes) else e.stderr}")
         return csv_file
     except Exception as e:
         logger.error(f"An error occurred: {e}")
