@@ -1,7 +1,7 @@
 ## agent_repo.py
 import sys
 import os
-
+from pathlib import Path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 # 获取父目录
 parent_dir = os.path.dirname(current_dir)
@@ -169,7 +169,9 @@ class RepositoryAgent:
         logger.info(f"Total number of API to be processed: {len(eggs)}")
         logger.info("Copy Database for each thread.")
         for i in tqdm(range(pool_num)):
-            shutil.copytree(self.database_db, f'{self.database_db}_{i}', dirs_exist_ok=True)
+            database_db_path = Path(self.database_db).resolve()
+            database_db_path.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(database_db_path, f'{database_db_path}_{i}', dirs_exist_ok=True)
             queue_id.put(i)
 
         with Pool(pool_num) as pool:   
